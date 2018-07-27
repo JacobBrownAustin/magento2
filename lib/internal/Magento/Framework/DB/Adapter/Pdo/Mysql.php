@@ -553,11 +553,15 @@ class Mysql extends \Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
 
                 // Check to reconnect
                 if ($pdoException && $triesCount < self::MAX_CONNECTION_RETRIES
-                    && in_array($pdoException->errorInfo[1], $connectionErrors)
+                    && (
+                        in_array($pdoException->errorInfo[1], $connectionErrors)
+                        // Note: If we are not in a transaction, and the error is Deadlock, it is safe to retry
+                        || (1213 === $pdoException->errorInfo[1] && 0 === $this->getTransactionLevel() )
+                    )
                 ) {
                     $retry = true;
                     $triesCount++;
-                    
+
                     /**
                     * _connect() function does not allow port parameter, so put the port back with the host
                     */
@@ -3580,7 +3584,9 @@ class Mysql extends \Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
         $select->reset(\Magento\Framework\DB\Select::DISTINCT);
         $select->reset(\Magento\Framework\DB\Select::COLUMNS);
 
-        $query = sprintf('DELETE %s %s', $this->quoteIdentifier($table), $select->assemble());
+        //TODO: Why does this seem broken?
+        #$query = sprintf('DELETE %s %s', $this->quoteIdentifier($table), $select->assemble());
+        $query = sprintf('DELETE %s', $select->assemble());
 
         return $query;
     }

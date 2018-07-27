@@ -66,30 +66,63 @@ class Schedule extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
     {
         $connection = $this->getConnection();
 
-        // this condition added to avoid cron jobs locking after incorrect termination of running job
-        $match = $connection->quoteInto(
-            'existing.job_code = current.job_code ' .
-            'AND (existing.executed_at > UTC_TIMESTAMP() - INTERVAL 1 DAY OR existing.executed_at IS NULL) ' .
-            'AND existing.status = ?',
-            $newStatus
+        $select = $connection->select()->from(
+            $this->getTable('cron_schedule'),
+            ['job_code']
+        )->where(
+            'schedule_id  = ?',
+            $scheduleId
         );
+        $jobCode = $connection->fetchOne($select);
+        if (is_null($jobCode)) {
+            return false;
+        }
 
-        $selectIfUnlocked = $connection->select()
-            ->joinLeft(
-                ['existing' => $this->getTable('cron_schedule')],
-                $match,
-                ['status' => new \Zend_Db_Expr($connection->quote($newStatus))]
-            )
-            ->where('current.schedule_id = ?', $scheduleId)
-            ->where('current.status = ?', $currentStatus)
-            ->where('existing.schedule_id IS NULL');
-
-        $update = $connection->updateFromSelect($selectIfUnlocked, ['current' => $this->getTable('cron_schedule')]);
-        $result = $connection->query($update)->rowCount();
-
+        // TODO: Would rather use upsert here, but looks like we don't have that in this database abstraction?
+        $result = $connection->update(
+            $this->getTable('cron_schedule_jobcode_lock'),
+            [
+                'schedule_id' => $scheduleId,
+                // TODO: We should probably be generating the timestamp on the server since we are comparing it on the server
+                'executed_at' => strftime('%Y-%m-%d %H:%M:%S', (int)gmdate('U'))
+            ],
+            ['(executed_at < UTC_TIMESTAMP() - INTERVAL 1 DAY OR executed_at IS NULL)', 'job_code = ?' => $jobCode]
+        );
         if ($result == 1) {
             return true;
         }
+        $result = $connection->insert(
+            $this->getTable('cron_schedule_jobcode_lock'),
+            [
+                'schedule_id' => $scheduleId,
+                // TODO: We should probably be generating the timestamp on the server since we are comparing it on the server
+                'executed_at' => strftime('%Y-%m-%d %H:%M:%S', (int)gmdate('U')),
+                'job_code' => $jobCode,
+            ]
+        );
+        if ($result == 1) {
+            return true;
+        }
+
         return false;
+    }
+
+    /**
+     * Deletes the scheduleId from the cron_schedule_jobcode_lock table.
+     *
+     * @param string $scheduleId
+     * @param string $newStatus
+     * @param string $currentStatus
+     * @return bool
+     * @since 100.2.0
+     */
+    public function deleteScheduleIdFromCronschedulejobcodelock($scheduleId)
+    {
+        $connection = $this->getConnection();
+        $affectedRows = $connection->delete(
+            $this->getTable('cron_schedule_jobcode_lock'),
+            ['schedule_id = ?' => $scheduleId]
+        );
+        return 0 < $affectedRows;
     }
 }

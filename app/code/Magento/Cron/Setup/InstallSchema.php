@@ -83,8 +83,43 @@ class InstallSchema implements InstallSchemaInterface
         )->addIndex(
             $installer->getIdxName('cron_schedule', ['scheduled_at', 'status']),
             ['scheduled_at', 'status']
+        )->addIndex(
+            $installer->getIdxName('cron_schedule', ['status', 'job_code']),
+            ['status', 'job_code']
         )->setComment(
             'Cron Schedule'
+        );
+        $installer->getConnection()->createTable($table);
+
+        /**
+         * Create table 'cron_schedule_jobcode_lock'
+         * We use this for locking job_codes from cron_schedule without creating deadlocks.
+         */
+        $table = $installer->getConnection()->newTable(
+            $installer->getTable('cron_schedule_jobcode_lock')
+        )->addColumn(
+            'job_code',
+            \Magento\Framework\DB\Ddl\Table::TYPE_TEXT,
+            255,
+            ['nullable' => false, 'primary' => true],
+            'Job Code'
+        )->addColumn(
+            'schedule_id',
+            \Magento\Framework\DB\Ddl\Table::TYPE_INTEGER,
+            null,
+            ['unsigned' => true, 'nullable' => false],
+            'Schedule Id'
+        )->addColumn(
+            'executed_at',
+            \Magento\Framework\DB\Ddl\Table::TYPE_TIMESTAMP,
+            null,
+            ['nullable' => true],
+            'Executed At'
+        )->addIndex(
+            $installer->getIdxName('cron_schedule_jobcode_lock', ['schedule_id']),
+            ['schedule_id']
+        )->setComment(
+            'Cron Schedule Jobcode Lock'
         );
         $installer->getConnection()->createTable($table);
 

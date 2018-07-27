@@ -243,7 +243,9 @@ class Schedule extends \Magento\Framework\Model\AbstractModel
      */
     public function tryLockJob()
     {
-        if ($this->_getResource()->trySetJobUniqueStatusAtomic(
+        /** @var  $resource ResourceModel\Schedule */
+        $resource = $this->_getResource();
+        if ($resource->trySetJobUniqueStatusAtomic(
             $this->getId(),
             self::STATUS_RUNNING,
             self::STATUS_PENDING
@@ -253,4 +255,22 @@ class Schedule extends \Magento\Framework\Model\AbstractModel
         }
         return false;
     }
+
+    /**
+     * Sets the status of this schedule.
+     *
+     * If the status is not RUNNING, make sure we try to DELETE from the lock table.
+     *
+     * @return this
+     */
+    public function setStatus(string $value)
+    {
+        if (self::STATUS_RUNNING != $value) {
+            /** @var  $resource ResourceModel\Schedule */
+            $resource = $this->_getResource();
+            $resource->deleteScheduleIdFromCronschedulejobcodelock($this->getId());
+        }
+        return parent::setStatus($value);
+    }
+
 }
