@@ -551,27 +551,26 @@ class Mysql extends \Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
                     $pdoException = $e->getPrevious();
                 }
 
-                // Check to reconnect
-                if ($pdoException && $triesCount < self::MAX_CONNECTION_RETRIES
-                    && (
-                        in_array($pdoException->errorInfo[1], $connectionErrors)
-                        // Note: If we are not in a transaction, and the error is Deadlock, it is safe to retry
-                        || (1213 === $pdoException->errorInfo[1] && 0 === $this->getTransactionLevel() )
-                    )
-                ) {
-                    $retry = true;
-                    $triesCount++;
+                if ($pdoException && $triesCount < self::MAX_CONNECTION_RETRIES && 0 === $this->getTransactionLevel()) {
+                    // Note: If we are not in a transaction, and the error is Deadlock, it is safe to retry
+                    if (1213 === $pdoException->errorInfo[1]) {
+                        $retry = true;
+                        $triesCount++;
+                    } else if (in_array($pdoException->errorInfo[1], $connectionErrors)) { // Check to reconnect
+                        $retry = true;
+                        $triesCount++;
 
-                    /**
-                    * _connect() function does not allow port parameter, so put the port back with the host
-                    */
-                    if (!empty($this->_config['port'])) {
-                        $this->_config['host'] = implode(':', [$this->_config['host'], $this->_config['port']]);
-                        unset($this->_config['port']);
+                        /**
+                         * _connect() function does not allow port parameter, so put the port back with the host
+                         */
+                        if (!empty($this->_config['port'])) {
+                            $this->_config['host'] = implode(':', [$this->_config['host'], $this->_config['port']]);
+                            unset($this->_config['port']);
+                        }
+
+                        $this->closeConnection();
+                        $this->_connect();
                     }
-
-                    $this->closeConnection();
-                    $this->_connect();
                 }
 
                 if (!$retry) {
