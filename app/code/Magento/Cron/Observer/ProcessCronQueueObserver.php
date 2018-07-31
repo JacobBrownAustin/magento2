@@ -69,6 +69,11 @@ class ProcessCronQueueObserver implements ObserverInterface
     const LOCK_PREFIX = 'CRON_GROUP_';
 
     /**
+     * Maximum amount of rows to delete per query
+     */
+    const DELETE_LIMIT = 1024;
+
+    /**
      * @var \Magento\Cron\Model\ResourceModel\Schedule\Collection
      */
     protected $_pendingSchedules;
@@ -500,14 +505,16 @@ class ProcessCronQueueObserver implements ObserverInterface
         $connection = $scheduleResource->getConnection();
         $count = 0;
         foreach ($historyLifetimes as $status => $time) {
-            $count += $connection->delete(
-                $scheduleResource->getMainTable(),
-                [
-                    'status = ?' => $status,
-                    'job_code in (?)' => array_keys($jobs),
-                    'created_at < ?' => $connection->formatDate($currentTime - $time)
-                ]
-            );
+            do {
+                $selectQuery = $connection->select()
+                    ->from($scheduleResource->getMainTable())
+                    ->where('status = ?', $status)
+                    ->where('job_code in (?)', array_keys($jobs))
+                    ->where('created_at < ?', $connection->formatDate($currentTime - $time))
+                    ->limit(self::DELETE_LIMIT);
+                $affectedRows = $connection->query($selectQuery->deleteFromSelect($scheduleResource->getMainTable()))->rowCount();
+                $count += $affectedRows;
+            } while (self::DELETE_LIMIT <= $affectedRows);
         }
 
         if ($count) {
@@ -611,14 +618,20 @@ class ProcessCronQueueObserver implements ObserverInterface
 
         if (count($jobsToCleanup) > 0) {
             $scheduleResource = $this->_scheduleFactory->create()->getResource();
-            $count = $scheduleResource->getConnection()->delete(
-                $scheduleResource->getMainTable(),
-                [
-                    'status = ?' => Schedule::STATUS_PENDING,
-                    'job_code in (?)' => $jobsToCleanup,
-                ]
-            );
-
+            $count = 0;
+            $connection = $scheduleResource->getConnection();
+            do {
+                $batchJobsToCleanup = array_splice($jobsToCleanup, -512);
+                do {
+                    $selectQuery = $connection->select()
+                        ->from($scheduleResource->getMainTable())
+                        ->where('status = ?', Schedule::STATUS_PENDING)
+                        ->where('job_code in (?)', $batchJobsToCleanup)
+                        ->limit(self::DELETE_LIMIT);
+                    $affectedRows = $connection->query($selectQuery->deleteFromSelect($scheduleResource->getMainTable()))->rowCount();
+                    $count += $affectedRows;
+                } while (self::DELETE_LIMIT <= $affectedRows);
+            } while (count($jobsToCleanup) > 0);
             $this->logger->info(sprintf('%d cron jobs were cleaned', $count));
         }
     }
@@ -652,12 +665,20 @@ class ProcessCronQueueObserver implements ObserverInterface
     {
         /** @var \Magento\Cron\Model\ResourceModel\Schedule $scheduleResource */
         $scheduleResource = $this->_scheduleFactory->create()->getResource();
+        $connection = $scheduleResource->getConnection();
         foreach ($this->invalid as $jobCode => $scheduledAtList) {
-            $scheduleResource->getConnection()->delete($scheduleResource->getMainTable(), [
-                'status = ?' => Schedule::STATUS_PENDING,
-                'job_code = ?' => $jobCode,
-                'scheduled_at in (?)' => $scheduledAtList,
-            ]);
+            do {
+                $batchScheduledAtList = array_splice($scheduledAtList, -512);
+                do {
+                    $selectQuery = $connection->select()
+                        ->from($scheduleResource->getMainTable())
+                        ->where('status = ?', Schedule::STATUS_PENDING)
+                        ->where('job_code = ?', $jobCode)
+                        ->where('scheduled_at in (?)', $batchScheduledAtList)
+                        ->limit(self::DELETE_LIMIT);
+                    $affectedRows = $connection->query($selectQuery->deleteFromSelect($scheduleResource->getMainTable()))->rowCount();
+                } while (self::DELETE_LIMIT <= $affectedRows);
+            } while (count($scheduledAtList) > 0);
         }
         return $this;
     }

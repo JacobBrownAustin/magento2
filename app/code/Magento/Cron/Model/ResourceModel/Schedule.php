@@ -78,15 +78,18 @@ class Schedule extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
             return false;
         }
 
+        $currentTime = gmdate('c');
+        $oneDayAgo = gmdate('c', time() - 60 * 60 * 24);
+
         // TODO: Would rather use upsert here, but looks like we don't have that in this database abstraction?
         $result = $connection->update(
             $this->getTable('cron_schedule_jobcode_lock'),
             [
                 'schedule_id' => $scheduleId,
                 // TODO: We should probably be generating the timestamp on the server since we are comparing it on the server
-                'executed_at' => strftime('%Y-%m-%d %H:%M:%S', (int)gmdate('U'))
+                'executed_at' => $currentTime
             ],
-            ['(executed_at < UTC_TIMESTAMP() - INTERVAL 1 DAY OR executed_at IS NULL)', 'job_code = ?' => $jobCode]
+            ["(executed_at < '$oneDayAgo' OR executed_at IS NULL)", 'job_code = ?' => $jobCode]
         );
         if ($result == 1) {
             return true;
@@ -96,7 +99,7 @@ class Schedule extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
             [
                 'schedule_id' => $scheduleId,
                 // TODO: We should probably be generating the timestamp on the server since we are comparing it on the server
-                'executed_at' => strftime('%Y-%m-%d %H:%M:%S', (int)gmdate('U')),
+                'executed_at' => $currentTime,
                 'job_code' => $jobCode,
             ]
         );
